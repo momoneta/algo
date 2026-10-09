@@ -82,11 +82,11 @@ def main():
             etiquetas.append([k in ahora for k in teclas])
             if raton:
                 movs.append(raton.tomar())
-        elif raton:
-            raton.tomar()  # descartar el movimiento mientras esta en pausa
             if time.time() - ultimo_aviso > 10:
                 print(f"  {len(fotos)} fotogramas ({len(fotos) / args.fps / 60:.1f} min)", flush=True)
                 ultimo_aviso = time.time()
+        elif raton:
+            raton.tomar()  # descartar el movimiento mientras esta en pausa
         time.sleep(max(0.0, periodo - (time.time() - t0)))
         if estado["grabando"]:
             tiempo_grabando += time.time() - t0

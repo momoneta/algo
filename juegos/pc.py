@@ -70,7 +70,13 @@ class Capturador:
         from PIL import Image
         img = self.sct.grab(self.zona)
         im = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
-        return np.asarray(im.convert("L").resize((TAM, TAM), Image.BILINEAR), dtype=np.uint8)
+        return np.array(im.convert("L").resize((TAM, TAM), Image.BILINEAR), dtype=np.uint8)
+
+    def fraccion_color(self, zona, color, tolerancia=60):
+        """Que parte de la zona tiene un color parecido a 'color' (0..1). Sirve para leer barras."""
+        img = np.asarray(self.sct.grab(zona), dtype=np.int16)[:, :, :3][:, :, ::-1]  # BGRA -> RGB
+        dist = np.abs(img - np.array(color, dtype=np.int16)).sum(2)
+        return float((dist < tolerancia).mean())
 
 
 class RedImitacion(nn.Module):

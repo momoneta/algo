@@ -119,6 +119,32 @@ Consejos:
   (esquivar, conducir, saltar, minar) que en juegos de estrategia o con mucho texto.
 - **No lo uses en juegos online con anti-trampas**: te pueden banear la cuenta.
 
+### Que aprenda SOLA (sin grabarte)
+
+`autoentrenar_pc.py` deja a la IA jugando por su cuenta (aprendizaje por refuerzo). Aprende de una recompensa
+que saca de la pantalla:
+
+- **Curiosidad** (siempre): premio por ver cosas nuevas, castigo si se queda atascada (la pantalla no cambia).
+- **Barra** (opcional, recomendado): una zona de la pantalla con un color, como la barra de experiencia o de vida.
+  Si hay más de ese color, premio. Usa `--barra-invertida` si menos color es mejor.
+
+```bash
+# Minecraft: explorar con curiosidad, empezando desde lo que aprendió imitándote
+python autoentrenar_pc.py --nombre Minecraft --teclas w,a,s,d,space --raton --region 0,0,1280,720 --desde-imitacion --minutos 60
+
+# Con la barra de experiencia verde de Minecraft como objetivo (ajusta la zona a tu pantalla)
+python autoentrenar_pc.py --nombre Minecraft --teclas w,a,s,d,space --raton --barra 450,650,380,6 --barra-color 128,255,32
+
+# Verla jugar con lo aprendido, sin seguir aprendiendo
+python autoentrenar_pc.py --nombre Minecraft --solo-jugar
+```
+
+- `F9` pausa (por si muere o se atasca y quieres arreglarlo a mano), `F10` para y guarda.
+- Si lo lanzas otra vez, **continúa** donde lo dejó (`modelos/auto_<nombre>.pt`).
+- Al principio actúa casi al azar y va dejando de hacerlo durante los primeros ~20 000 pasos (~1 h a 5 por segundo).
+  Necesita **horas**: déjalo jugando en un mundo que no te importe.
+- Para encontrar la zona de la barra: haz una captura de pantalla y mira las coordenadas en Paint.
+
 ---
 
 ## 3. IA de código
@@ -183,6 +209,7 @@ interfaz.py           interfaz gráfica con todo lo de abajo
 grabar_pc.py          graba tus partidas de cualquier juego de PC
 entrenar_pc.py        entrena la IA que te imita
 jugar_pc.py           la IA juega sola pulsando teclas
+autoentrenar_pc.py    la IA aprende sola jugando (refuerzo con curiosidad / barra)
 juegos/pc.py          captura de pantalla, red de imitación y teclado
 dispositivo.py        detección de CPU / GPU (incluidas integradas)
 entrenar_juego.py     entrena la IA de juegos (DQN)

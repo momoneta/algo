@@ -39,6 +39,7 @@ class App(tk.Tk):
 
         self.pestana_juegos(pestanas)
         self.pestana_pc(pestanas)
+        self.pestana_auto(pestanas)
         self.pestana_minigpt(pestanas)
         self.pestana_asistente(pestanas)
 
@@ -140,6 +141,35 @@ class App(tk.Tk):
             "--modelo", os.path.join("modelos", f"pc_{nombre.get()}.pt"), "--umbral", umbral.get(),
             "--raton-escala", escala.get()])
         ).grid(row=1, column=2, sticky="w", padx=4)
+
+    def pestana_auto(self, nb):
+        f = ttk.Frame(nb)
+        nb.add(f, text="PC: aprende sola")
+        ttk.Label(f, text="La IA juega sola y aprende de una recompensa: curiosidad (ver cosas nuevas, no quedarse "
+                          "atascada) y, si quieres, una barra de la pantalla (vida, experiencia...) que debe crecer. "
+                          "F9 pausa, F10 para y guarda. Si lo vuelves a lanzar, sigue donde lo dejo.",
+                  wraplength=880).pack(anchor="w", padx=8, pady=4)
+        s = self.seccion(f, "Entrenar sola")
+        nombre = self.campo(s, 0, "Nombre del juego", "mijuego")
+        teclas = self.campo(s, 1, "Teclas que puede usar", "w,a,s,d,space")
+        raton = self.campo(s, 2, "Puede usar el raton", True, tipo="check")
+        region = self.campo(s, 3, "Region del juego x,y,ancho,alto", "")
+        minutos = self.campo(s, 4, "Minutos", 30, ancho=10)
+        desde = self.campo(s, 5, "Empezar desde lo que te imito", False, tipo="check")
+        barra = self.campo(s, 6, "Barra x,y,ancho,alto (opcional)", "")
+        color = self.campo(s, 7, "Color de la barra r,g,b", "0,200,0", ancho=14)
+        invertida = self.campo(s, 8, "Menos color es mejor", False, tipo="check")
+
+        def args_comunes():
+            return ["--nombre", nombre.get(), "--region", region.get()]
+
+        ttk.Button(s, text="Entrenar sola", command=lambda: self.ejecutar("autoentrenar_pc.py", args_comunes() + [
+            "--teclas", teclas.get(), "--minutos", minutos.get(), "--barra", barra.get(),
+            "--barra-color", color.get()] + (["--raton"] if raton.get() else [])
+            + (["--desde-imitacion"] if desde.get() else []) + (["--barra-invertida"] if invertida.get() else []))
+        ).grid(row=9, column=1, sticky="w", pady=4)
+        ttk.Button(s, text="Ver jugar (sin aprender)", command=lambda: self.ejecutar("autoentrenar_pc.py",
+            args_comunes() + ["--solo-jugar", "--minutos", minutos.get()])).grid(row=9, column=2, sticky="w", pady=4)
 
     def pestana_minigpt(self, nb):
         f = ttk.Frame(nb)
