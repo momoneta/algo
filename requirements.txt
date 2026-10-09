@@ -1,0 +1,10 @@
+# Base (juegos + mini GPT de codigo)
+numpy
+torch
+gymnasium[box2d]      # juegos de Gymnasium (CartPole, LunarLander...). box2d es opcional
+# ale-py              # descomenta para juegos de Atari (Breakout, Pong...)
+
+# Fine-tuning de modelos de codigo preentrenados
+transformers>=4.45
+peft>=0.13
+accelerate

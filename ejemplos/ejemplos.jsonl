@@ -1,0 +1,3 @@
+{"pregunta": "Como leo un archivo de texto en Python?", "respuesta": "Usa `with open` para que el archivo se cierre solo:\n\n```python\nwith open('archivo.txt', encoding='utf-8') as f:\n    texto = f.read()\n```"}
+{"pregunta": "Como invierto una lista en Python?", "respuesta": "Puedes usar `lista[::-1]` para obtener una copia invertida, o `lista.reverse()` para invertirla en el sitio."}
+{"pregunta": "Escribe una funcion que diga si un numero es primo", "respuesta": "```python\ndef es_primo(n):\n    if n < 2:\n        return False\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return False\n        i += 1\n    return True\n```"}
