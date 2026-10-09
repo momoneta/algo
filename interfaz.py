@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, RAIZ)  # para importar juegos/ aunque se lance desde otra carpeta
 DISPOSITIVOS = ["auto", "cuda", "xpu", "mps", "directml", "cpu"]
 
 # En Windows con pantallas escaladas (125%, 150%...) sin esto las coordenadas no coinciden
@@ -111,9 +112,16 @@ def _abrir_selector(app, titulo, al_terminar):
 
     def terminar(zona):
         sel.destroy()
-        app.deiconify()
-        if zona:
-            al_terminar(zona)
+
+        def despues():
+            # primero se usa la zona (p. ej. capturar el objeto) y despues vuelve la ventana,
+            # para no fotografiar la propia ventana de la IA
+            try:
+                if zona:
+                    al_terminar(zona)
+            finally:
+                app.deiconify()
+        app.after(250, despues)
 
     def pulsar(e):
         datos["ini"] = (e.x_root, e.y_root)
@@ -372,8 +380,8 @@ class App(tk.Tk):
 
         # 4. Aprender sola
         a = self.tarjeta(rejilla, 4, "Que aprenda sola",
-                         "Juega por su cuenta y aprende de la curiosidad y, si marcas una, de una barra "
-                         "(experiencia, vida...). Usa las teclas de tus grabaciones.", 2, 1)
+                         "Juega por su cuenta: explora por curiosidad, busca los objetos que le ensenes "
+                         "(abajo) y, si marcas una, intenta llenar una barra (experiencia...).", 2, 1)
         minutos = self.campo(a, 0, "Minutos", 60)
         desde = self.campo(a, 1, "Partir de lo imitado", True, tipo="check")
         ttk.Label(a, text="Barra", style="Tarjeta.TLabel").grid(row=2, column=0, sticky="w", pady=3)
@@ -415,9 +423,49 @@ class App(tk.Tk):
         ttk.Button(botones, text="Ver jugar", command=lambda: self.ejecutar("autoentrenar_pc.py", [
             "--nombre", self.pc_nombre.get(), "--solo-jugar", "--minutos", minutos.get()])).pack(side="left", padx=6)
 
+        # Objetos
+        o = self.tarjeta(rejilla, None, "Ensenar objetos (para que aprenda sola)",
+                         "Pon el juego delante de un objeto (p. ej. un tronco), escribe su nombre y pulsa "
+                         "'Marcar en pantalla': marca un trozo donde se vea SOLO ese objeto. Anade varios "
+                         "ejemplos (de cerca, de lejos, con sombra). La IA buscara, se acercara y picara/recogera "
+                         "esos objetos.", 3, 0, colspan=2)
+        ttk.Label(o, text="Objeto", style="Tarjeta.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.objeto = tk.StringVar(value="madera")
+        ttk.Combobox(o, textvariable=self.objeto, width=14, values=["madera", "piedra", "carbon", "hierro",
+                                                                   "hojas", "enemigo", "comida"]
+                     ).grid(row=0, column=1, sticky="w")
+        ttk.Button(o, text="Marcar en pantalla", style="Acento.TButton",
+                   command=lambda: elegir_zona(self, f"Marca un trozo de '{self.objeto.get()}' (solo el objeto)",
+                                               self.objeto_marcado)).grid(row=0, column=2, padx=6)
+        ttk.Button(o, text="Probar deteccion", command=lambda: self.ejecutar("ensenar_objeto.py", [
+            "--nombre", self.pc_nombre.get(), "--probar", "--region", self.pc_region.get()])).grid(row=0, column=3)
+        ttk.Button(o, text="Borrar objeto", style="Peligro.TButton", command=self.borrar_objeto
+                   ).grid(row=0, column=4, padx=6)
+        self.lista_objetos = ttk.Label(o, text="", style="Suave.TLabel")
+        self.lista_objetos.grid(row=1, column=0, columnspan=5, sticky="w", pady=(8, 0))
+
         for fila in (1, 2):
             rejilla.rowconfigure(fila, weight=1)
         self.actualizar_perfil()
+
+    def objeto_marcado(self, zona):
+        from juegos.objetos import anadir_ejemplo, capturar_zona
+        nombre, objeto = self.pc_nombre.get().strip(), self.objeto.get().strip()
+        if not (nombre and objeto):
+            return
+        ejemplo = capturar_zona(zona)
+        pantalla = capturar_zona((0, 0, self.winfo_screenwidth(), self.winfo_screenheight()))
+        total = anadir_ejemplo(nombre, objeto, ejemplo, raiz=RAIZ, pantalla=pantalla)
+        self.escribir(f"Ensenado '{objeto}' para {nombre}: {total} pixeles de ejemplo. "
+                      "Anade mas ejemplos con distinta luz o distancia.\n", "ok")
+        self.actualizar_perfil()
+
+    def borrar_objeto(self):
+        from juegos.objetos import borrar_objeto
+        nombre, objeto = self.pc_nombre.get().strip(), self.objeto.get().strip()
+        if messagebox.askyesno("Borrar", f"Borrar todo lo ensenado de '{objeto}' en {nombre}?"):
+            borrar_objeto(nombre, objeto, raiz=RAIZ)
+            self.actualizar_perfil()
 
     def juegos_existentes(self):
         nombres = {os.path.basename(p) for p in glob.glob(os.path.join(RAIZ, "datos_pc", "*")) if os.path.isdir(p)}
@@ -456,6 +504,15 @@ class App(tk.Tk):
             else:
                 partes.append(f"{texto}: sin entrenar")
         self.perfil.configure(text="\n".join(partes))
+        if hasattr(self, "lista_objetos"):
+            try:
+                from juegos.objetos import objetos_de
+                objs = objetos_de(nombre, raiz=RAIZ)
+            except Exception:
+                objs = {}
+            self.lista_objetos.configure(
+                text=("Objetos ensenados: " + ", ".join(f"{k} ({int(v.sum())} px)" for k, v in objs.items()))
+                if objs else "Todavia no le has ensenado ningun objeto para este juego.")
         self.combo_juegos.configure(values=self.juegos_existentes())
 
     # ---------- pagina: juegos clasicos ----------

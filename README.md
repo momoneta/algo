@@ -142,6 +142,27 @@ python autoentrenar_pc.py --nombre Minecraft --barra 450,650,380,6 --barra-color
 python autoentrenar_pc.py --nombre Minecraft --solo-jugar
 ```
 
+#### Enseñarle objetos (madera, piedra...) para que los busque
+
+La IA puede **reconocer objetos que tú le enseñas** y aprender a buscarlos, acercarse, apuntarles y
+picarlos/recogerlos:
+
+1. Pon el juego delante del objeto (por ejemplo un tronco).
+2. En la interfaz, tarjeta **"Enseñar objetos"**: escribe el nombre (`madera`) y pulsa **"Marcar en pantalla"**.
+   Marca un trozo donde se vea **solo** ese objeto. Añade varios ejemplos: de cerca, de lejos, con sombra,
+   otros tipos de árbol... Si se cuela un poco de hierba o cielo, se descarta solo.
+   (Por consola: `python ensenar_objeto.py --nombre Minecraft --objeto madera --zona x,y,ancho,alto`)
+3. **"Probar detección"** dice cuánto ve de cada objeto en la pantalla actual.
+4. Entrena sola como siempre: usará todos los objetos enseñados (`--objetos madera` para elegir).
+
+Qué aprende: la IA recibe, además de la imagen, un **mapa de dónde está cada objeto**. Gana premio al
+acercarse (el objeto se ve más grande), al ponerlo en el centro de la mira y, sobre todo, cuando hace clic
+sin mover la cámara y el objeto desaparece de la mira (lo ha picado). Si no ve ninguno, la curiosidad
+la hace recorrer el mundo hasta encontrarlo.
+
+El reconocimiento es por **colores**: distingue bien objetos de color característico (troncos, hojas,
+minerales, agua, lava, enemigos de colores...), pero confundirá cosas del mismo color (p. ej. tablones y troncos).
+
 - `F9` pausa (por si muere o se atasca y quieres arreglarlo a mano), `F10` para y guarda.
 - Si lo lanzas otra vez, **continúa** donde lo dejó (`modelos/auto_<nombre>.pt`).
 - Al principio actúa casi al azar y va dejando de hacerlo durante los primeros ~20 000 pasos (~1 h a 5 por segundo).
@@ -212,7 +233,9 @@ interfaz.py           interfaz gráfica con todo lo de abajo
 grabar_pc.py          graba tus partidas de cualquier juego de PC
 entrenar_pc.py        entrena la IA que te imita
 jugar_pc.py           la IA juega sola pulsando teclas
-autoentrenar_pc.py    la IA aprende sola jugando (refuerzo con curiosidad / barra)
+autoentrenar_pc.py    la IA aprende sola jugando (refuerzo con curiosidad / objetos / barra)
+ensenar_objeto.py     enseñarle objetos (madera, piedra...) marcándolos en pantalla
+juegos/objetos.py     reconocimiento de objetos por color
 juegos/pc.py          captura de pantalla, red de imitación y teclado
 dispositivo.py        detección de CPU / GPU (incluidas integradas)
 entrenar_juego.py     entrena la IA de juegos (DQN)

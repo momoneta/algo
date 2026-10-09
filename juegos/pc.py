@@ -128,6 +128,15 @@ class Capturador:
         im = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
         return np.array(im.convert("L").resize((TAM, TAM), Image.BILINEAR), dtype=np.uint8)
 
+    def captura_con_color(self):
+        """(gris TAMxTAM, color TAMxTAMx3) de una sola captura: el color sirve para reconocer objetos."""
+        from PIL import Image
+        img = self.sct.grab(self.zona)
+        im = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+        gris = im.convert("L").resize((TAM, TAM), Image.BILINEAR)
+        color = im.resize((TAM, TAM), Image.NEAREST)  # sin mezclar colores, para reconocer objetos
+        return np.array(gris, dtype=np.uint8), np.array(color, dtype=np.uint8)
+
     def fraccion_color(self, zona, color, tolerancia=60):
         """Que parte de la zona tiene un color parecido a 'color' (0..1). Sirve para leer barras."""
         img = np.asarray(self.sct.grab(zona), dtype=np.int16)[:, :, :3][:, :, ::-1]  # BGRA -> RGB

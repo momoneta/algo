@@ -6,10 +6,14 @@ La recompensa se calcula mirando la pantalla:
     atascada (la pantalla no cambia). Funciona en cualquier juego sin configurar.
   * Barra (opcional): una zona de la pantalla con un color, p. ej. la barra de
     vida o de experiencia. Si hay mas de ese color -> premio; si hay menos -> castigo.
+  * Objetos (opcional, muy util): cosas que le ensenas marcandolas en pantalla
+    (madera, piedra...) con ensenar_objeto.py o la interfaz. La IA ve donde estan
+    y gana premio al buscarlas, acercarse, apuntarles y picarlas/recogerlas.
 
   python autoentrenar_pc.py --nombre minecraft --minutos 60
   python autoentrenar_pc.py --nombre minecraft --desde-imitacion
   python autoentrenar_pc.py --nombre juego --barra 20,40,200,10 --barra-color 0,200,0
+  python ensenar_objeto.py --nombre minecraft --objeto madera --zona 600,300,40,40   (y luego entrenar)
 
 Teclas: por defecto usa las que tu usaste en tus grabaciones de ese juego; si no hay
 grabaciones, un conjunto amplio de teclas tipicas de juego. Tambien se puede dar una lista.
@@ -28,6 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dispositivo import elegir_dispositivo, describir
+from juegos.objetos import Detector, objetos_de
 from juegos.pc import (APILAR, CLICS, PELIGROSAS, TAM, TECLAS_JUEGO, Capturador, RedImitacion, Teclado,
                        avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas, teclas_grabadas)
 
@@ -94,17 +99,37 @@ def acciones_guardadas(guardado):
 
 
 class RedQ(nn.Module):
-    """Misma 'vista' (capas convolucionales) que la red de imitacion, para poder reutilizarla."""
+    """Misma 'vista' (capas convolucionales) que la red de imitacion, para poder reutilizarla.
+    Con objetos ensenados recibe un canal mas: el mapa de donde estan los objetos."""
 
-    def __init__(self, n_acciones):
+    def __init__(self, n_acciones, canales=APILAR):
         super().__init__()
         base = RedImitacion(1)
         self.conv = base.conv
+        if canales != APILAR:
+            self.conv[0] = nn.Conv2d(canales, 32, 8, stride=4)
         n = base.cabeza[0].in_features
         self.cabeza = nn.Sequential(nn.Linear(n, 512), nn.ReLU(), nn.Linear(512, n_acciones))
 
     def forward(self, x):
         return self.cabeza(self.conv(x / 255.0))
+
+
+def cargar_red(red, estado, con_cabeza=True):
+    """Carga pesos aunque cambie el numero de canales de entrada (p. ej. al anadir objetos).
+    Los canales que coinciden se copian; los nuevos empiezan en cero."""
+    propio = red.state_dict()
+    for k, v in estado.items():
+        if k not in propio or (not con_cabeza and not k.startswith("conv.")):
+            continue
+        if propio[k].shape == v.shape:
+            propio[k] = v
+        elif k == "conv.0.weight":
+            c = min(v.shape[1], propio[k].shape[1])
+            nuevo = torch.zeros_like(propio[k])
+            nuevo[:, :c] = v[:, :c]
+            propio[k] = nuevo
+    red.load_state_dict(propio)
 
 
 class Curiosidad(nn.Module):
@@ -133,17 +158,20 @@ class Curiosidad(nn.Module):
 class Memoria:
     """Guarda cada fotograma una sola vez (ahorra mucha RAM) y arma las pilas al sacar muestras."""
 
-    def __init__(self, capacidad):
+    def __init__(self, capacidad, con_mascara=False):
         self.cap = capacidad
         self.fotos = np.zeros((capacidad, TAM, TAM), np.uint8)
+        self.mascaras = np.zeros((capacidad, TAM, TAM), np.uint8) if con_mascara else None
         self.acc = np.zeros(capacidad, np.int64)
         self.rec = np.zeros(capacidad, np.float32)
         self.corte = np.ones(capacidad, bool)  # True = no se puede apilar hacia atras desde aqui
         self.i = 0
         self.n = 0
 
-    def nueva_foto(self, foto, corte=False):
+    def nueva_foto(self, foto, corte=False, mascara=None):
         self.fotos[self.i] = foto
+        if self.mascaras is not None:
+            self.mascaras[self.i] = 255 * mascara if mascara is not None else 0
         self.corte[self.i] = corte
         idx = self.i
         self.i = (self.i + 1) % self.cap
@@ -161,7 +189,10 @@ class Memoria:
                 ids.insert(0, ids[0])
             else:
                 ids.insert(0, (ids[0] - 1) % self.cap)
-        return self.fotos[ids]
+        if self.mascaras is None:
+            return self.fotos[ids]
+        # canal extra: donde estan los objetos ensenados en el fotograma actual
+        return np.concatenate([self.fotos[ids], self.mascaras[idx][None]])
 
     def muestra(self, lote):
         validos = []
@@ -190,6 +221,9 @@ def main():
     p.add_argument("--barra-color", default="0,200,0", help="color r,g,b de la barra")
     p.add_argument("--barra-invertida", action="store_true", help="MENOS color es mejor (p. ej. barra de dano)")
     p.add_argument("--peso-curiosidad", type=float, default=1.0)
+    p.add_argument("--objetos", default="todos",
+                   help="objetos ensenados a buscar: 'todos' (por defecto), una lista 'madera,piedra' o 'ninguno'")
+    p.add_argument("--peso-objetos", type=float, default=1.0)
     p.add_argument("--desde-imitacion", action="store_true",
                    help="empezar con la 'vista' aprendida en modelos/pc_<nombre>.pt")
     p.add_argument("--solo-jugar", action="store_true", help="no aprender, solo jugar con lo aprendido")
@@ -226,25 +260,38 @@ def main():
 
     print(f"Dispositivo: {describir(d)} | {len(acciones)} acciones posibles")
 
-    red = RedQ(len(acciones)).to(d)
-    objetivo = RedQ(len(acciones)).to(d)
+    # Objetos ensenados (madera, piedra...)
+    objetos = {} if args.objetos.strip().lower() in ("ninguno", "no", "") else objetos_de(args.nombre)
+    if args.objetos.strip().lower() not in ("todos", "ninguno", "no", ""):
+        pedidos = [o.strip() for o in args.objetos.split(",")]
+        faltan = [o for o in pedidos if o not in objetos]
+        if faltan:
+            print(f"Aviso: no has ensenado {', '.join(faltan)} (usa ensenar_objeto.py)")
+        objetos = {o: h for o, h in objetos.items() if o in pedidos}
+    detector = Detector(objetos) if objetos else None
+    if detector:
+        print("Busca: " + ", ".join(detector.nombres))
+    canales = APILAR + (1 if detector else 0)
+
+    red = RedQ(len(acciones), canales).to(d)
+    objetivo = RedQ(len(acciones), canales).to(d)
     curiosidad = Curiosidad().to(d)
     pasos = 0
     if guardado and not solo_vista:
-        red.load_state_dict(guardado["red"])
+        cargar_red(red, guardado["red"])
         curiosidad.load_state_dict(guardado["curiosidad"])
         pasos = guardado["pasos"]
     elif guardado:
         # no se sabe con que acciones se entreno: se conserva lo que aprendio a "ver"
         # y la parte que decide la accion empieza de nuevo
-        red.conv.load_state_dict({k[5:]: v for k, v in guardado["red"].items() if k.startswith("conv.")})
+        cargar_red(red, guardado["red"], con_cabeza=False)
         curiosidad.load_state_dict(guardado["curiosidad"])
         print("Aviso: el modelo guardado usaba otras acciones; se conserva su vista y se reajusta el resto")
     elif args.desde_imitacion:
         ruta_imit = os.path.join("modelos", f"pc_{args.nombre}.pt")
         if os.path.exists(ruta_imit):
             estado = torch.load(ruta_imit, map_location="cpu", weights_only=False)["modelo"]
-            red.conv.load_state_dict({k[5:]: v for k, v in estado.items() if k.startswith("conv.")})
+            cargar_red(red, estado, con_cabeza=False)
             print(f"Empieza con la vista aprendida en {ruta_imit}")
         else:
             print(f"Aviso: no existe {ruta_imit}, empieza de cero")
@@ -281,7 +328,7 @@ def main():
 
     cap = Capturador(parsear_region(region))
     teclado = Teclado()
-    memoria = Memoria(args.memoria)
+    memoria = Memoria(args.memoria, con_mascara=detector is not None)
     periodo = 1.0 / args.fps
     fin_tiempo = time.time() + args.minutos * 60
     media_cur, var_cur = 0.0, 1.0
@@ -289,22 +336,35 @@ def main():
     nivel_barra = cap.fraccion_color(barra, color) if barra else 0.0
     ult_guardado = ult_aviso = time.time()
     suma_rec, n_rec = 0.0, 0
+    n_obj = len(detector.nombres) if detector else 0
+    medidas = np.zeros((n_obj, 3))      # visible, centro, mira de cada objeto
+    recogidos = np.zeros(n_obj, int)
+
+    def mirar():
+        """Captura la pantalla; con objetos, tambien donde estan y cuanto se ven."""
+        if not detector:
+            return cap.captura(), None, medidas
+        gris, rgb = cap.captura_con_color()
+        mascaras = detector.detectar(rgb)
+        m = np.array([Detector.medir(mk) for mk in mascaras])
+        return gris, mascaras.any(0), m
 
     def guardar():
         if not args.solo_jugar:
             torch.save({"red": red.state_dict(), "curiosidad": curiosidad.state_dict(), "teclas": teclas,
-                        "raton": raton, "region": region, "pasos": pasos, "acciones": acciones}, ruta)
+                        "raton": raton, "region": region, "pasos": pasos, "acciones": acciones,
+                        "canales": canales, "objetos": detector.nombres if detector else []}, ruta)
 
-    foto = cap.captura()
-    idx = memoria.nueva_foto(foto, corte=True)
+    foto, mascara, medidas = mirar()
+    idx = memoria.nueva_foto(foto, corte=True, mascara=mascara)
     try:
         while not estado["fin"] and time.time() < fin_tiempo:
             t0 = time.time()
             if estado["pausa"]:
                 teclado.soltar_todo()
                 time.sleep(0.2)
-                foto = cap.captura()
-                idx = memoria.nueva_foto(foto, corte=True)  # tras la pausa empieza una racha nueva
+                foto, mascara, medidas = mirar()
+                idx = memoria.nueva_foto(foto, corte=True, mascara=mascara)  # tras la pausa, racha nueva
                 continue
 
             # 1. Elegir accion (al principio mucho al azar, luego cada vez menos)
@@ -323,7 +383,7 @@ def main():
             teclado.mover_suave(dx, dy, max(0.0, periodo - (time.time() - t0)))
 
             # 3. Mirar el resultado y calcular la recompensa
-            nueva = cap.captura()
+            nueva, mascara, nuevas = mirar()
             with torch.no_grad():
                 cur = curiosidad(torch.as_tensor(nueva[None, None], dtype=torch.float32, device=d)).item()
             media_cur = 0.99 * media_cur + 0.01 * cur
@@ -331,8 +391,23 @@ def main():
             r = args.peso_curiosidad * float(np.clip((cur - media_cur) / (var_cur ** 0.5 + 1e-6), -1, 3)) * 0.1
             cambio = np.abs(nueva.astype(np.int16) - foto.astype(np.int16)).mean()
             quieto = quieto + 1 if cambio < 1.0 else 0
-            if quieto > 3 * args.fps:  # atascada mas de 3 segundos
+            picando = n_obj > 0 and nuevas[:, 2].max() > 0.2  # quieta pero apuntando a un objeto: bien
+            if quieto > 3 * args.fps and not picando:  # atascada mas de 3 segundos
                 r -= 0.2
+            for i in range(n_obj):
+                (vis0, cen0, mir0), (vis, cen, mir) = medidas[i], nuevas[i]
+                ro = float(np.clip((vis - vis0) * 10, -0.3, 0.5))   # se acerca (lo ve mas grande)
+                ro += 0.2 * cen + 0.3 * mir                         # lo tiene delante / en la mira
+                # golpeando sin mover la camara ni andar: si desaparece de la mira es que lo ha
+                # picado/recogido (si no, la IA haria trampa girando la camara mientras hace clic)
+                solo_clic = set(pulsa) == {"clic_izq"} and dx == 0 and dy == 0
+                if solo_clic and mir0 > 0.3:
+                    ro += 0.1                                       # lo esta golpeando
+                    if mir < mir0 * 0.5:                            # ha desaparecido de la mira: recogido
+                        ro += 2.0
+                        recogidos[i] += 1
+                r += args.peso_objetos * ro
+            medidas = nuevas
             if barra:
                 nivel = cap.fraccion_color(barra, color)
                 delta = (nivel - nivel_barra) * (-1 if args.barra_invertida else 1)
@@ -342,7 +417,7 @@ def main():
                 nivel_barra = nivel
             memoria.apuntar(idx, a, r)
             foto = nueva
-            idx = memoria.nueva_foto(foto)
+            idx = memoria.nueva_foto(foto, mascara=mascara)
             suma_rec += r
             n_rec += 1
             pasos += 1
@@ -363,7 +438,7 @@ def main():
                 perdida.backward()
                 nn.utils.clip_grad_norm_(red.parameters(), 10)
                 optim.step()
-                perdida_cur = curiosidad(sig[:, -1:]).mean()
+                perdida_cur = curiosidad(sig[:, APILAR - 1:APILAR]).mean()
                 optim_cur.zero_grad()
                 perdida_cur.backward()
                 optim_cur.step()
@@ -372,6 +447,9 @@ def main():
 
             if time.time() - ult_aviso > 15:
                 txt_barra = f" | barra {nivel_barra * 100:.0f}%" if barra else ""
+                txt_barra += "".join(f" | {n}: ve {medidas[i, 0] * 100:.0f}% mira {medidas[i, 2] * 100:.0f}%"
+                                     f" recogidos {recogidos[i]}" for i, n in enumerate(detector.nombres)) \
+                    if detector else ""
                 print(f"paso {pasos:7d} | recompensa media {suma_rec / max(n_rec, 1):+.3f} | azar {eps:.2f}"
                       f"{txt_barra} | quedan {max(0, fin_tiempo - time.time()) / 60:.0f} min", flush=True)
                 suma_rec, n_rec, ult_aviso = 0.0, 0, time.time()
