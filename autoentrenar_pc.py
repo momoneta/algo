@@ -68,6 +68,31 @@ def crear_acciones(teclas, raton):
     return acciones
 
 
+def crear_acciones_v1(teclas, raton):
+    """Acciones de la primera version (modelos guardados antes de que se guardara la lista)."""
+    acciones = [((), 0, 0)] + [((k,), 0, 0) for k in teclas]
+    if "w" in teclas:
+        acciones += [(("w", k), 0, 0) for k in teclas if k in ("space", "shift", "ctrl", "a", "d")]
+    if raton:
+        acciones += [((), -30, 0), ((), 30, 0), ((), 0, -15), ((), 0, 15)]
+        acciones += [((c,), 0, 0) for c in CLICS.values()]
+        if "w" in teclas:
+            acciones += [(("w",), -30, 0), (("w",), 30, 0)]
+    return acciones
+
+
+def acciones_guardadas(guardado):
+    """Las acciones con las que se entreno un modelo guardado (para poder continuarlo)."""
+    if "acciones" in guardado:
+        return guardado["acciones"]
+    n = guardado["red"]["cabeza.2.weight"].shape[0]
+    for crear in (crear_acciones_v1, crear_acciones):
+        acciones = crear(guardado["teclas"], guardado["raton"])
+        if len(acciones) == n:
+            return acciones
+    return None
+
+
 class RedQ(nn.Module):
     """Misma 'vista' (capas convolucionales) que la red de imitacion, para poder reutilizarla."""
 
@@ -193,17 +218,28 @@ def main():
         print(f"Teclas: {', '.join(teclas)}  <- {origen}")
         raton, region = not args.sin_raton, args.region
     # al continuar se usan las mismas acciones con las que se entreno
-    acciones = guardado["acciones"] if guardado and "acciones" in guardado else crear_acciones(teclas, raton)
+    acciones = acciones_guardadas(guardado) if guardado else None
+    solo_vista = False
+    if acciones is None:
+        acciones = crear_acciones(teclas, raton)
+        solo_vista = guardado is not None
+
     print(f"Dispositivo: {describir(d)} | {len(acciones)} acciones posibles")
 
     red = RedQ(len(acciones)).to(d)
     objetivo = RedQ(len(acciones)).to(d)
     curiosidad = Curiosidad().to(d)
     pasos = 0
-    if guardado:
+    if guardado and not solo_vista:
         red.load_state_dict(guardado["red"])
         curiosidad.load_state_dict(guardado["curiosidad"])
         pasos = guardado["pasos"]
+    elif guardado:
+        # no se sabe con que acciones se entreno: se conserva lo que aprendio a "ver"
+        # y la parte que decide la accion empieza de nuevo
+        red.conv.load_state_dict({k[5:]: v for k, v in guardado["red"].items() if k.startswith("conv.")})
+        curiosidad.load_state_dict(guardado["curiosidad"])
+        print("Aviso: el modelo guardado usaba otras acciones; se conserva su vista y se reajusta el resto")
     elif args.desde_imitacion:
         ruta_imit = os.path.join("modelos", f"pc_{args.nombre}.pt")
         if os.path.exists(ruta_imit):
@@ -217,6 +253,8 @@ def main():
     optim_cur = torch.optim.Adam(curiosidad.alumno.parameters(), lr=1e-4)
 
     barra = parsear_region(args.barra)
+    if args.barra_invertida and not barra:
+        print("Aviso: --barra-invertida no hace nada sin --barra (marca la zona de la barra)")
     color = [int(c) for c in args.barra_color.split(",")]
 
     estado = {"fin": False, "pausa": False}
