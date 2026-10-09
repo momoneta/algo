@@ -357,6 +357,7 @@ def main():
     n_obj = len(nombres_obj)
     medidas = np.zeros((n_obj, 3))      # visible, centro, mira de cada objeto
     recogidos = np.zeros(n_obj, int)
+    golpes = np.zeros(n_obj, int)       # fotogramas seguidos golpeando cada objeto
 
     def mirar():
         """Captura la pantalla; con objetos, tambien donde estan y cuanto se ven."""
@@ -417,16 +418,23 @@ def main():
                 r -= 0.2
             for i in range(n_obj):
                 (vis0, cen0, mir0), (vis, cen, mir) = medidas[i], nuevas[i]
-                ro = float(np.clip((vis - vis0) * 10, -0.3, 0.5))   # se acerca (lo ve mas grande)
-                ro += 0.2 * cen + 0.3 * mir                         # lo tiene delante / en la mira
+                # Solo cuenta MEJORAR (verlo mas grande, mas centrado): quedarse mirando no da nada.
+                # (Si diera premio por tenerlo en la mira, la IA aprende a mirarlo para siempre sin picar)
+                ro = float(np.clip((vis - vis0) * 10, -0.3, 0.5))
+                ro += float(np.clip((cen - cen0) + (mir - mir0), -0.5, 0.5))
                 # golpeando sin mover la camara ni andar: si desaparece de la mira es que lo ha
                 # picado/recogido (si no, la IA haria trampa girando la camara mientras hace clic)
                 solo_clic = set(pulsa) == {"clic_izq"} and dx == 0 and dy == 0
                 if solo_clic and mir0 > 0.3:
-                    ro += 0.1                                       # lo esta golpeando
+                    golpes[i] += 1
+                    if golpes[i] <= 6 * args.fps:                   # premio por golpear, solo unos segundos
+                        ro += 0.05
                     if mir < mir0 * 0.5:                            # ha desaparecido de la mira: recogido
-                        ro += 2.0
+                        ro += 3.0
                         recogidos[i] += 1
+                        golpes[i] = 0
+                elif mir0 <= 0.3:
+                    golpes[i] = 0
                 r += pesos_obj[i] * ro
             medidas = nuevas
             if barra:
