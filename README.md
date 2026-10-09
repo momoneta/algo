@@ -3,7 +3,8 @@
 Proyecto para entrenar tu propia IA **en tu PC**, sin servicios en la nube.
 Funciona con CPU, GPU dedicada y **GPU integrada** (Intel Iris Xe / Arc, AMD Radeon, Apple M).
 
-**¿No te gustan los comandos?** Abre la interfaz gráfica y hazlo todo con botones:
+**¿No te gustan los comandos?** Abre la interfaz gráfica y hazlo todo con botones
+(incluye elegir la zona del juego y la barra arrastrando con el ratón):
 
 ```bash
 python interfaz.py
@@ -89,15 +90,14 @@ y añádela en `crear_entorno()` de `entrenar_juego.py`. La clave es diseñar bi
 
 Funciona con casi cualquier juego (Minecraft, juegos de carreras, plataformas, emuladores…):
 
-1. **Grabar**: juegas tú y se guardan la pantalla y las teclas que pulsas.
+1. **Grabar**: juegas tú y se guardan la pantalla, **todas las teclas** que pulses, la cámara y los clics.
    ```bash
-   python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift
+   python grabar_pc.py --nombre minecraft --region 0,0,1280,720 --fps 15
    ```
    `F9` empieza/pausa, `F10` termina y guarda. Puedes grabar varias sesiones; se juntan todas.
-   Añade `--raton` para grabar también **el movimiento de cámara y los clics** (izquierdo y derecho):
-   ```bash
-   python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift,ctrl,e,1,2,3 --raton --region 0,0,1280,720 --fps 15
-   ```
+   No hace falta decir qué teclas: se aprenden todas las que uses (se ignoran las casi no usadas y
+   Esc, F4, F9, F10 y la tecla de Windows). Si prefieres limitarlo: `--teclas w,a,s,d,space`.
+   Sin ratón: `--sin-raton`.
 2. **Entrenar**: la red aprende "con esta imagen, se pulsan estas teclas".
    ```bash
    python entrenar_pc.py --nombre minecraft --epocas 15
@@ -110,10 +110,12 @@ Funciona con casi cualquier juego (Minecraft, juegos de carreras, plataformas, e
 Consejos:
 - Pon el juego **en ventana** y usa `--region x,y,ancho,alto` con la zona del juego (más rápido y preciso).
 - Graba **mucho** (30–60 min) y juega siempre de forma parecida: la IA copia lo que ve, también tus errores.
-- Elige pocas teclas: solo las importantes.
+- Puedes grabar varias sesiones aunque uses teclas distintas: al entrenar se juntan todas.
 - Si la IA no pulsa casi nada, baja `--umbral` (p. ej. 0.3); si pulsa demasiado, súbelo.
 - En Windows, `pydirectinput` hace que funcione con juegos DirectX que ignoran las teclas simuladas normales.
-- Con ratón: si la IA gira la cámara demasiado poco o demasiado, ajusta `--raton-escala` (p. ej. 2 o 0.5).
+- Ratón: la cámara se mueve de forma fluida (el giro se reparte durante cada fotograma) y suavizada.
+  Si gira demasiado poco o demasiado, ajusta `--raton-escala` (p. ej. 2 o 0.5); si tiembla, sube
+  `--suavizado` (0 a 0.9).
   Con `--sin-raton` juega solo con el teclado. No cambies la sensibilidad del ratón del juego entre grabar y jugar.
 - Aprende lo que ve en una imagen pequeña (96×96 en grises), así que funciona mejor en juegos de reacción
   (esquivar, conducir, saltar, minar) que en juegos de estrategia o con mucho texto.
@@ -130,10 +132,11 @@ que saca de la pantalla:
 
 ```bash
 # Minecraft: explorar con curiosidad, empezando desde lo que aprendió imitándote
-python autoentrenar_pc.py --nombre Minecraft --teclas w,a,s,d,space --raton --region 0,0,1280,720 --desde-imitacion --minutos 60
+# (usa solas las teclas de tus grabaciones; si no hay, un conjunto amplio de teclas típicas de juego)
+python autoentrenar_pc.py --nombre Minecraft --region 0,0,1280,720 --desde-imitacion --minutos 60
 
 # Con la barra de experiencia verde de Minecraft como objetivo (ajusta la zona a tu pantalla)
-python autoentrenar_pc.py --nombre Minecraft --teclas w,a,s,d,space --raton --barra 450,650,380,6 --barra-color 128,255,32
+python autoentrenar_pc.py --nombre Minecraft --barra 450,650,380,6 --barra-color 128,255,32
 
 # Verla jugar con lo aprendido, sin seguir aprendiendo
 python autoentrenar_pc.py --nombre Minecraft --solo-jugar
