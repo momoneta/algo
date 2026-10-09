@@ -124,17 +124,21 @@ class App(tk.Tk):
         region = self.campo(s, 2, "Region x,y,ancho,alto", "")
         ttk.Label(s, text="(vacio = pantalla completa)").grid(row=2, column=2, sticky="w")
         fps = self.campo(s, 3, "Fotogramas/seg", 10, ancho=10)
+        raton = self.campo(s, 4, "Grabar raton (camara y clics)", False, tipo="check")
         ttk.Button(s, text="Grabar", command=lambda: self.ejecutar("grabar_pc.py", [
-            "--nombre", nombre.get(), "--teclas", teclas.get(), "--region", region.get(), "--fps", fps.get()])
-        ).grid(row=4, column=1, sticky="w", pady=4)
+            "--nombre", nombre.get(), "--teclas", teclas.get(), "--region", region.get(), "--fps", fps.get()]
+            + (["--raton"] if raton.get() else []))
+        ).grid(row=5, column=1, sticky="w", pady=4)
 
         s = self.seccion(f, "2. Entrenar   3. Jugar")
         epocas = self.campo(s, 0, "Epocas", 15, ancho=10)
         ttk.Button(s, text="Entrenar", command=lambda: self.ejecutar("entrenar_pc.py", [
             "--nombre", nombre.get(), "--epocas", epocas.get()])).grid(row=0, column=2, sticky="w", padx=4)
         umbral = self.campo(s, 1, "Umbral para pulsar", 0.5, ancho=10)
+        escala = self.campo(s, 2, "Velocidad del raton", 1.0, ancho=10)
         ttk.Button(s, text="Jugar", command=lambda: self.ejecutar("jugar_pc.py", [
-            "--modelo", os.path.join("modelos", f"pc_{nombre.get()}.pt"), "--umbral", umbral.get()])
+            "--modelo", os.path.join("modelos", f"pc_{nombre.get()}.pt"), "--umbral", umbral.get(),
+            "--raton-escala", escala.get()])
         ).grid(row=1, column=2, sticky="w", padx=4)
 
     def pestana_minigpt(self, nb):

@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from dispositivo import elegir_dispositivo, describir
-from juegos.pc import APILAR, Capturador, RedImitacion, Teclado, avisar_al_parar, nombre_tecla, parsear_region
+from juegos.pc import APILAR, CENTROS_MOV, Capturador, RedImitacion, Teclado, avisar_al_parar, nombre_tecla, parsear_region
 
 
 def main():
@@ -22,6 +22,9 @@ def main():
     p.add_argument("--umbral", type=float, default=0.5, help="probabilidad minima para pulsar una tecla")
     p.add_argument("--region", default=None, help="por defecto la misma que al grabar")
     p.add_argument("--espera", type=int, default=5, help="segundos antes de empezar")
+    p.add_argument("--raton-escala", type=float, default=1.0,
+                   help="multiplica el movimiento del raton (sube si gira poco, baja si gira demasiado)")
+    p.add_argument("--sin-raton", action="store_true", help="no mover el raton aunque el modelo sepa")
     p.add_argument("--dispositivo", default="auto")
     args = p.parse_args()
 
@@ -30,12 +33,16 @@ def main():
     datos = torch.load(args.modelo, map_location="cpu", weights_only=False)
     teclas = datos["teclas"]
     d = elegir_dispositivo(args.dispositivo)
-    modelo = RedImitacion(len(teclas))
+    raton = datos.get("raton", False)
+    modelo = RedImitacion(len(teclas), raton)
     modelo.load_state_dict(datos["modelo"])
     modelo.to(d).eval()
     region = args.region if args.region is not None else datos.get("region", "")
     fps = datos.get("fps", 10)
-    print(f"Dispositivo: {describir(d)} | teclas {teclas} | {fps} fps")
+    usar_raton = raton and not args.sin_raton
+    print(f"Dispositivo: {describir(d)} | teclas {teclas} | {fps} fps"
+          + (" | mueve el raton" if usar_raton else ""))
+    centros = torch.as_tensor(CENTROS_MOV, device=d)
 
     parar = {"si": False}
 
@@ -65,9 +72,18 @@ def main():
             pila.append(cap.captura())
             x = torch.as_tensor(np.stack(pila)[None], dtype=torch.float32, device=d)
             with torch.no_grad():
-                prob = torch.sigmoid(modelo(x))[0].cpu().numpy()
+                lt, lx, ly = modelo(x)
+                prob = torch.sigmoid(lt)[0].cpu().numpy()
+                if usar_raton:
+                    # movimiento esperado segun las probabilidades de cada grupo
+                    dx = (torch.softmax(lx, 1)[0] * centros).sum().item() * args.raton_escala
+                    dy = (torch.softmax(ly, 1)[0] * centros).sum().item() * args.raton_escala
             for k, pr in zip(teclas, prob):
+                if k.startswith("clic_") and not usar_raton:
+                    continue
                 teclado.poner(k, pr > args.umbral)
+            if usar_raton:
+                teclado.mover(dx if abs(dx) >= 2 else 0, dy if abs(dy) >= 2 else 0)
             time.sleep(max(0.0, periodo - (time.time() - t0)))
     finally:
         teclado.soltar_todo()

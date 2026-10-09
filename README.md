@@ -94,6 +94,10 @@ Funciona con casi cualquier juego (Minecraft, juegos de carreras, plataformas, e
    python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift
    ```
    `F9` empieza/pausa, `F10` termina y guarda. Puedes grabar varias sesiones; se juntan todas.
+   Añade `--raton` para grabar también **el movimiento de cámara y los clics** (izquierdo y derecho):
+   ```bash
+   python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift,ctrl,e,1,2,3 --raton --region 0,0,1280,720 --fps 15
+   ```
 2. **Entrenar**: la red aprende "con esta imagen, se pulsan estas teclas".
    ```bash
    python entrenar_pc.py --nombre minecraft --epocas 15
@@ -109,8 +113,10 @@ Consejos:
 - Elige pocas teclas: solo las importantes.
 - Si la IA no pulsa casi nada, baja `--umbral` (p. ej. 0.3); si pulsa demasiado, súbelo.
 - En Windows, `pydirectinput` hace que funcione con juegos DirectX que ignoran las teclas simuladas normales.
+- Con ratón: si la IA gira la cámara demasiado poco o demasiado, ajusta `--raton-escala` (p. ej. 2 o 0.5).
+  Con `--sin-raton` juega solo con el teclado. No cambies la sensibilidad del ratón del juego entre grabar y jugar.
 - Aprende lo que ve en una imagen pequeña (96×96 en grises), así que funciona mejor en juegos de reacción
-  (esquivar, conducir, saltar) que en juegos de estrategia o con mucho texto. El ratón no se graba.
+  (esquivar, conducir, saltar, minar) que en juegos de estrategia o con mucho texto.
 - **No lo uses en juegos online con anti-trampas**: te pueden banear la cuenta.
 
 ---
