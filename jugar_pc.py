@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from dispositivo import elegir_dispositivo, describir
+from juegos.ventana import region_texto, ventana_activa
 from juegos.pc import APILAR, CENTROS_MOV_ANTIGUOS, PELIGROSAS, Capturador, decidir_mov, RedImitacion, Teclado, avisar_al_parar, nombre_tecla, parsear_region
 
 
@@ -20,7 +21,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--modelo", required=True)
     p.add_argument("--umbral", type=float, default=0.5, help="probabilidad minima para pulsar una tecla")
-    p.add_argument("--region", default=None, help="por defecto la misma que al grabar")
+    p.add_argument("--region", default=None, help="por defecto la misma que al grabar; 'auto' = ventana activa")
     p.add_argument("--espera", type=int, default=5, help="segundos antes de empezar")
     p.add_argument("--raton-escala", type=float, default=1.0,
                    help="multiplica el movimiento del raton (sube si gira poco, baja si gira demasiado)")
@@ -67,6 +68,10 @@ def main():
         time.sleep(1)
     print("JUGANDO. Pulsa F10 para parar.", flush=True)
 
+    if region.strip().lower() == "auto":
+        titulo, zona = ventana_activa()
+        region = region_texto(zona) if zona and zona[2] >= 50 and zona[3] >= 50 else ""
+        print(f"Juego detectado: '{titulo}' en la zona {region or 'pantalla completa'}", flush=True)
     cap = Capturador(parsear_region(region))
     teclado = Teclado()
     pila = deque([cap.captura()] * APILAR, maxlen=APILAR)

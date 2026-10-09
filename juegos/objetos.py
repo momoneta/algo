@@ -121,3 +121,56 @@ class Detector:
         centro = mascara[h // 3: 2 * h // 3, w // 3: 2 * w // 3]
         mira = mascara[2 * h // 5: 3 * h // 5, 2 * w // 5: 3 * w // 5]
         return float(mascara.mean()), float(centro.mean()), float(mira.mean())
+
+
+class DetectorAuto:
+    """Detecta 'cosas' SIN ensenarle nada, en cualquier juego.
+
+    Una 'cosa' es una zona compacta que destaca: su color ocupa poco de la imagen actual (no es cielo,
+    suelo ni pared) o es raro en ese juego (minerales, enemigos, cofres...). Lo que nunca cambia en
+    pantalla aunque se mueva la camara (barra de objetos, vida, la mira) es la interfaz y se ignora.
+    """
+
+    def __init__(self, destaca=0.04, raro=0.0015, calentamiento=40, max_pantalla=0.4):
+        self.p_fondo = None
+        self.n = 0
+        self.destaca = destaca
+        self.raro = raro
+        self.calentamiento = calentamiento
+        self.max_pantalla = max_pantalla
+        self.anterior = None
+        self.movimiento = None   # cuanto cambia cada pixel (media); ~0 = interfaz fija
+
+    def _aprender(self, h, ritmo):
+        self.p_fondo = h.copy() if self.p_fondo is None else (1 - ritmo) * self.p_fondo + ritmo * h
+
+    def detectar(self, rgb):
+        idx = indices_color(rgb)
+        total = np.bincount(idx.ravel(), minlength=N_COLORES) / idx.size
+        gris = rgb.mean(2)
+        if self.anterior is not None:
+            cambio = np.abs(gris - self.anterior)
+            if cambio.mean() > 2:  # la camara se ha movido: se ve que pixeles nunca cambian
+                self.movimiento = cambio if self.movimiento is None else 0.97 * self.movimiento + 0.03 * cambio
+        self.anterior = gris
+        self.n += 1
+        self._aprender(total, max(1.0 / self.n, 0.01))
+        if self.n <= self.calentamiento:  # primeros fotogramas: solo aprende como es el juego
+            return np.zeros(idx.shape, bool)
+
+        en_imagen = suavizar(total)
+        en_imagen /= en_imagen.sum()
+        fondo = suavizar(self.p_fondo)
+        fondo /= fondo.sum()
+        candidato = (en_imagen[idx] < self.destaca) | (fondo[idx] < self.raro)
+        if self.movimiento is not None:
+            candidato &= self.movimiento > 1.0  # fuera la interfaz fija
+        # quitar puntitos sueltos: un pixel cuenta si la mayoria de sus vecinos tambien
+        r = candidato.astype(np.int8)
+        p = np.pad(r, 1)
+        vecinos = sum(p[1 + dy:1 + dy + r.shape[0], 1 + dx:1 + dx + r.shape[1]]
+                      for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+        mascara = candidato & (vecinos >= 5)
+        if mascara.mean() > self.max_pantalla:  # media pantalla "destaca" = menu o cambio de escena
+            return np.zeros(idx.shape, bool)
+        return mascara

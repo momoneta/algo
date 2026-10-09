@@ -18,6 +18,8 @@ import time
 
 import numpy as np
 
+from juegos.ventana import region_texto, ventana_activa
+
 from juegos.pc import CLICS, PELIGROSAS, Capturador, ordenar_teclas, OyenteRaton, avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas
 
 
@@ -25,7 +27,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--nombre", required=True, help="nombre del juego (carpeta de datos)")
     p.add_argument("--teclas", default="todas", help="'todas' (por defecto) o una lista: w,a,s,d,space")
-    p.add_argument("--region", default="", help="x,y,ancho,alto (vacio = pantalla completa)")
+    p.add_argument("--region", default="", help="x,y,ancho,alto; 'auto' = la ventana activa al pulsar F9 "
+                                                "(vacio = pantalla completa)")
     p.add_argument("--fps", type=float, default=10)
     p.add_argument("--sin-raton", action="store_true", help="no grabar el raton")
     p.add_argument("--raton", action="store_true", help=argparse.SUPPRESS)  # antiguo: ahora es lo normal
@@ -69,7 +72,7 @@ def main():
                 pulsadas.discard(nombre)
         raton = OyenteRaton(al_clic)
     avisar_al_parar(estado)
-    cap = Capturador(parsear_region(args.region))
+    cap = None if args.region.strip().lower() == "auto" else Capturador(parsear_region(args.region))
 
     print("Teclas a aprender: " + ("TODAS las que pulses" if teclas is None else ", ".join(teclas))
           + (" + raton (camara y clics)" if usar_raton else ""))
@@ -80,6 +83,12 @@ def main():
     tiempo_grabando = 0.0
     while not estado["fin"]:
         t0 = time.time()
+        if estado["grabando"] and cap is None:
+            # zona automatica: la ventana que tiene el foco al empezar a grabar (el juego)
+            titulo, zona = ventana_activa()
+            args.region = region_texto(zona) if zona and zona[2] >= 50 and zona[3] >= 50 else ""
+            print(f"Juego detectado: '{titulo}' en la zona {args.region or 'pantalla completa'}", flush=True)
+            cap = Capturador(parsear_region(args.region))
         if estado["grabando"]:
             fotos.append(cap.captura())
             ahora = pulsadas | toques

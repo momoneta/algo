@@ -326,8 +326,9 @@ class App(tk.Tk):
 
         # Perfil del juego
         p = self.tarjeta(rejilla, None, "Tu juego",
-                         "Pon un nombre (se guarda todo con ese nombre) y marca la zona de la pantalla donde "
-                         "esta el juego. Mejor con el juego en ventana.", 0, 0, colspan=2)
+                         "Pulsa 'Detectar juego' y haz clic en la ventana del juego: se ponen solos el nombre y la "
+                         "zona. Tambien puedes escribirlos o marcar la zona a mano. Mejor con el juego en ventana.",
+                         0, 0, colspan=2)
         ttk.Label(p, text="Nombre", style="Tarjeta.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.pc_nombre = tk.StringVar(value=(self.juegos_existentes() or ["Minecraft"])[0])
         self.combo_juegos = ttk.Combobox(p, textvariable=self.pc_nombre, values=self.juegos_existentes(), width=16)
@@ -337,13 +338,17 @@ class App(tk.Tk):
         ttk.Label(p, text="Zona", style="Tarjeta.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 8))
         self.pc_region = tk.StringVar(value="")
         ttk.Entry(p, textvariable=self.pc_region, width=16).grid(row=0, column=3, sticky="w")
-        ttk.Button(p, text="Elegir en pantalla", style="Acento.TButton",
+        fila_botones = ttk.Frame(p, style="Tarjeta.TFrame")
+        fila_botones.grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Button(fila_botones, text="Detectar juego", style="Acento.TButton", command=self.detectar_juego
+                   ).pack(side="left")
+        ttk.Button(fila_botones, text="Marcar zona a mano",
                    command=lambda: elegir_zona(self, "Marca la ventana del juego",
                                                lambda z: self.pc_region.set(",".join(map(str, z))))
-                   ).grid(row=0, column=4, padx=6)
-        ttk.Button(p, text="Completa", command=lambda: self.pc_region.set("")).grid(row=0, column=5)
+                   ).pack(side="left", padx=6)
+        ttk.Button(fila_botones, text="Pantalla completa", command=lambda: self.pc_region.set("")).pack(side="left")
         self.perfil = ttk.Label(p, text="", style="Suave.TLabel", justify="left", wraplength=500)
-        self.perfil.grid(row=1, column=0, columnspan=6, sticky="w", pady=(10, 0))
+        self.perfil.grid(row=2, column=0, columnspan=6, sticky="w", pady=(10, 0))
         p.master.bind("<Configure>", lambda e: self.perfil.configure(wraplength=max(300, e.width - 32)), add="+")
 
         # 1. Grabar
@@ -466,6 +471,27 @@ class App(tk.Tk):
         if messagebox.askyesno("Borrar", f"Borrar todo lo ensenado de '{objeto}' en {nombre}?"):
             borrar_objeto(nombre, objeto, raiz=RAIZ)
             self.actualizar_perfil()
+
+    def detectar_juego(self, quedan=5):
+        """Cuenta atras: el usuario hace clic en la ventana del juego y se toman su nombre y su zona."""
+        if quedan > 0:
+            self.poner_estado(f"Haz clic en la ventana del juego... {quedan}", C["aviso"], True)
+            self.after(1000, lambda: self.detectar_juego(quedan - 1))
+            return
+        from juegos.ventana import nombre_juego, region_texto, ventana_activa
+        titulo, zona = ventana_activa()
+        if not zona or zona[2] < 50 or zona[3] < 50 or (titulo or "").startswith("IA local"):
+            self.poner_estado("No se detecto el juego: haz clic en su ventana durante la cuenta atras",
+                              C["error"], False)
+            self.lift()
+            return
+        self.pc_nombre.set(nombre_juego(titulo))
+        self.pc_region.set(region_texto(zona))
+        self.poner_estado(f"Juego detectado: {titulo}", C["ok"], False)
+        self.escribir(f"Juego detectado: '{titulo}' -> nombre '{self.pc_nombre.get()}', "
+                      f"zona {self.pc_region.get()}\n", "ok")
+        self.actualizar_perfil()
+        self.lift()
 
     def juegos_existentes(self):
         nombres = {os.path.basename(p) for p in glob.glob(os.path.join(RAIZ, "datos_pc", "*")) if os.path.isdir(p)}

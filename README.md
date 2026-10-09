@@ -142,6 +142,17 @@ python autoentrenar_pc.py --nombre Minecraft --barra 450,650,380,6 --barra-color
 python autoentrenar_pc.py --nombre Minecraft --solo-jugar
 ```
 
+#### Funciona en cualquier juego sin configurar nada
+
+- **Detectar juego**: en la interfaz pulsa "Detectar juego" y haz clic en la ventana del juego durante la
+  cuenta atrás; se ponen solos el nombre (sacado del título, p. ej. "Minecraft 1.20.1" → `Minecraft`) y la
+  zona de la ventana. Por consola: `--region auto` en `grabar_pc.py`, `jugar_pc.py` y `autoentrenar_pc.py`.
+- **Detecta "cosas" sola**: sin enseñarle nada, la IA marca lo que destaca en la imagen (zonas compactas con
+  colores distintos del cielo, suelo y paredes, o colores raros en ese juego: árboles, rocas, animales,
+  minerales, cofres...). Lo que nunca se mueve en pantalla (barra de objetos, vida, la mira) lo aprende
+  como interfaz y lo ignora. Gana premio al acercarse, apuntar y picar esas cosas; si no ve ninguna, explora.
+  Está activado por defecto (`--sin-auto` para quitarlo, `--peso-auto` para darle más o menos importancia).
+
 #### Enseñarle objetos (madera, piedra...) para que los busque
 
 La IA puede **reconocer objetos que tú le enseñas** y aprender a buscarlos, acercarse, apuntarles y

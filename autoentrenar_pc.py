@@ -32,7 +32,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dispositivo import elegir_dispositivo, describir
-from juegos.objetos import Detector, objetos_de
+from juegos.objetos import Detector, DetectorAuto, objetos_de
+from juegos.ventana import region_texto, ventana_activa
 from juegos.pc import (APILAR, CLICS, PELIGROSAS, TAM, TECLAS_JUEGO, Capturador, RedImitacion, Teclado,
                        avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas, teclas_grabadas)
 
@@ -214,7 +215,8 @@ def main():
     p.add_argument("--sin-raton", action="store_true", help="no mover la camara ni hacer clic")
     p.add_argument("--raton", action="store_true", help=argparse.SUPPRESS)  # antiguo: ahora es lo normal
     p.add_argument("--carpeta", default="datos_pc", help=argparse.SUPPRESS)
-    p.add_argument("--region", default="", help="x,y,ancho,alto del juego (vacio = pantalla completa)")
+    p.add_argument("--region", default="", help="x,y,ancho,alto del juego, 'auto' = la ventana donde hagas clic "
+                                                "(vacio = pantalla completa)")
     p.add_argument("--fps", type=float, default=5, help="decisiones por segundo")
     p.add_argument("--minutos", type=float, default=30)
     p.add_argument("--barra", default="", help="x,y,ancho,alto de una barra (vida, experiencia, puntos...)")
@@ -224,6 +226,9 @@ def main():
     p.add_argument("--objetos", default="todos",
                    help="objetos ensenados a buscar: 'todos' (por defecto), una lista 'madera,piedra' o 'ninguno'")
     p.add_argument("--peso-objetos", type=float, default=1.0)
+    p.add_argument("--sin-auto", action="store_true",
+                   help="no buscar 'cosas interesantes' automaticamente (colores raros en el juego)")
+    p.add_argument("--peso-auto", type=float, default=0.5)
     p.add_argument("--desde-imitacion", action="store_true",
                    help="empezar con la 'vista' aprendida en modelos/pc_<nombre>.pt")
     p.add_argument("--solo-jugar", action="store_true", help="no aprender, solo jugar con lo aprendido")
@@ -242,7 +247,8 @@ def main():
 
     if os.path.exists(ruta):
         guardado = torch.load(ruta, map_location="cpu", weights_only=False)
-        teclas, raton, region = guardado["teclas"], guardado["raton"], guardado["region"]
+        teclas, raton = guardado["teclas"], guardado["raton"]
+        region = args.region or guardado["region"]  # la zona indicada ahora manda (la ventana pudo moverse)
         print(f"Continuando el entrenamiento de {ruta} ({guardado['pasos']} pasos previos)")
     else:
         if args.solo_jugar:
@@ -269,9 +275,13 @@ def main():
             print(f"Aviso: no has ensenado {', '.join(faltan)} (usa ensenar_objeto.py)")
         objetos = {o: h for o, h in objetos.items() if o in pedidos}
     detector = Detector(objetos) if objetos else None
-    if detector:
-        print("Busca: " + ", ".join(detector.nombres))
-    canales = APILAR + (1 if detector else 0)
+    auto = None if args.sin_auto else DetectorAuto()
+    nombres_obj = (detector.nombres if detector else []) + (["cosas nuevas"] if auto else [])
+    pesos_obj = [args.peso_objetos] * (len(nombres_obj) - (1 if auto else 0)) + ([args.peso_auto] if auto else [])
+    if nombres_obj:
+        print("Busca: " + ", ".join(nombres_obj)
+              + ("  (cosas nuevas = colores raros en este juego, se detectan solas)" if auto else ""))
+    canales = APILAR + (1 if nombres_obj else 0)
 
     red = RedQ(len(acciones), canales).to(d)
     objetivo = RedQ(len(acciones), canales).to(d)
@@ -326,9 +336,17 @@ def main():
         time.sleep(1)
     print("EN MARCHA. F9 pausa, F10 para y guarda.", flush=True)
 
+    if region.strip().lower() == "auto":
+        titulo, zona = ventana_activa()
+        if not zona or zona[2] < 50 or zona[3] < 50:
+            print("Aviso: no se pudo detectar la ventana del juego; se usa la pantalla completa")
+            region = ""
+        else:
+            region = region_texto(zona)
+            print(f"Juego detectado: '{titulo}' en la zona {region}")
     cap = Capturador(parsear_region(region))
     teclado = Teclado()
-    memoria = Memoria(args.memoria, con_mascara=detector is not None)
+    memoria = Memoria(args.memoria, con_mascara=bool(nombres_obj))
     periodo = 1.0 / args.fps
     fin_tiempo = time.time() + args.minutos * 60
     media_cur, var_cur = 0.0, 1.0
@@ -336,16 +354,19 @@ def main():
     nivel_barra = cap.fraccion_color(barra, color) if barra else 0.0
     ult_guardado = ult_aviso = time.time()
     suma_rec, n_rec = 0.0, 0
-    n_obj = len(detector.nombres) if detector else 0
+    n_obj = len(nombres_obj)
     medidas = np.zeros((n_obj, 3))      # visible, centro, mira de cada objeto
     recogidos = np.zeros(n_obj, int)
 
     def mirar():
         """Captura la pantalla; con objetos, tambien donde estan y cuanto se ven."""
-        if not detector:
+        if not n_obj:
             return cap.captura(), None, medidas
         gris, rgb = cap.captura_con_color()
-        mascaras = detector.detectar(rgb)
+        mascaras = list(detector.detectar(rgb)) if detector else []
+        if auto:
+            mascaras.append(auto.detectar(rgb))
+        mascaras = np.array(mascaras)
         m = np.array([Detector.medir(mk) for mk in mascaras])
         return gris, mascaras.any(0), m
 
@@ -353,7 +374,7 @@ def main():
         if not args.solo_jugar:
             torch.save({"red": red.state_dict(), "curiosidad": curiosidad.state_dict(), "teclas": teclas,
                         "raton": raton, "region": region, "pasos": pasos, "acciones": acciones,
-                        "canales": canales, "objetos": detector.nombres if detector else []}, ruta)
+                        "canales": canales, "objetos": nombres_obj}, ruta)
 
     foto, mascara, medidas = mirar()
     idx = memoria.nueva_foto(foto, corte=True, mascara=mascara)
@@ -406,7 +427,7 @@ def main():
                     if mir < mir0 * 0.5:                            # ha desaparecido de la mira: recogido
                         ro += 2.0
                         recogidos[i] += 1
-                r += args.peso_objetos * ro
+                r += pesos_obj[i] * ro
             medidas = nuevas
             if barra:
                 nivel = cap.fraccion_color(barra, color)
@@ -448,8 +469,7 @@ def main():
             if time.time() - ult_aviso > 15:
                 txt_barra = f" | barra {nivel_barra * 100:.0f}%" if barra else ""
                 txt_barra += "".join(f" | {n}: ve {medidas[i, 0] * 100:.0f}% mira {medidas[i, 2] * 100:.0f}%"
-                                     f" recogidos {recogidos[i]}" for i, n in enumerate(detector.nombres)) \
-                    if detector else ""
+                                     f" recogidos {recogidos[i]}" for i, n in enumerate(nombres_obj))
                 print(f"paso {pasos:7d} | recompensa media {suma_rec / max(n_rec, 1):+.3f} | azar {eps:.2f}"
                       f"{txt_barra} | quedan {max(0, fin_tiempo - time.time()) / 60:.0f} min", flush=True)
                 suma_rec, n_rec, ult_aviso = 0.0, 0, time.time()
