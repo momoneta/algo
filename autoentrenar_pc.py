@@ -391,6 +391,8 @@ def main():
 
             # 1. Elegir accion (al principio mucho al azar, luego cada vez menos)
             eps = 0.02 if args.solo_jugar else max(0.05, 1.0 - pasos / args.azar_pasos)
+            if quieto > 2 * args.fps:
+                eps = max(eps, 0.5)  # atascada (la pantalla no cambia): probar cosas al azar para salir
             if random.random() < eps:
                 a = random.randrange(len(acciones))
             else:
