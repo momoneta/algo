@@ -197,7 +197,7 @@ class App(tk.Tk):
             if not messagebox.askyesno("Ocupado", "Ya hay algo en marcha. Detenerlo y empezar esto?"):
                 return
             self.detener()
-        if script != "dispositivo.py":
+        if script not in ("dispositivo.py", "grabar_pc.py"):  # estos no usan la GPU
             args = args + ["--dispositivo", self.dispositivo.get()]
         cmd = [sys.executable, "-u", script] + [str(a) for a in args]
         self.escribir(f"\n$ {' '.join(cmd[2:])}\n")

@@ -25,12 +25,14 @@ def main():
     p.add_argument("--region", default="", help="x,y,ancho,alto (vacio = pantalla completa)")
     p.add_argument("--fps", type=float, default=10)
     p.add_argument("--carpeta", default="datos_pc")
+    p.add_argument("--dispositivo", default="auto", help=argparse.SUPPRESS)  # grabar no usa la GPU
     args = p.parse_args()
 
     from pynput import keyboard
 
     teclas = parsear_teclas(args.teclas)
     pulsadas = set()
+    toques = set()  # teclas pulsadas desde el ultimo fotograma (para no perder toques rapidos)
     estado = {"grabando": False, "fin": False}
 
     def al_pulsar(t):
@@ -42,6 +44,7 @@ def main():
             estado["fin"] = True
             return False
         pulsadas.add(n)
+        toques.add(n)
 
     def al_soltar(t):
         pulsadas.discard(nombre_tecla(t))
@@ -56,25 +59,34 @@ def main():
     fotos, etiquetas = [], []
     periodo = 1.0 / args.fps
     ultimo_aviso = time.time()
+    tiempo_grabando = 0.0
     while not estado["fin"]:
         t0 = time.time()
         if estado["grabando"]:
             fotos.append(cap.captura())
-            etiquetas.append([k in pulsadas for k in teclas])
+            ahora = pulsadas | toques
+            toques.clear()
+            etiquetas.append([k in ahora for k in teclas])
             if time.time() - ultimo_aviso > 10:
                 print(f"  {len(fotos)} fotogramas ({len(fotos) / args.fps / 60:.1f} min)", flush=True)
                 ultimo_aviso = time.time()
         time.sleep(max(0.0, periodo - (time.time() - t0)))
+        if estado["grabando"]:
+            tiempo_grabando += time.time() - t0
     oyente.stop()
 
     if not fotos:
         print("No se grabo nada.")
         return
+    fps_real = min(args.fps, len(fotos) / max(tiempo_grabando, 1e-6))
+    if fps_real < args.fps * 0.9:
+        print(f"Aviso: tu PC solo llego a {fps_real:.1f} fps (pediste {args.fps:g}). "
+              f"Usa --region con la zona del juego o menos --fps.")
     carpeta = os.path.join(args.carpeta, args.nombre)
     os.makedirs(carpeta, exist_ok=True)
     ruta = os.path.join(carpeta, f"sesion_{time.strftime('%Y%m%d_%H%M%S')}.npz")
     np.savez_compressed(ruta, fotos=np.stack(fotos), etiquetas=np.array(etiquetas, dtype=np.uint8),
-                        teclas=np.array(teclas), fps=args.fps, region=args.region)
+                        teclas=np.array(teclas), fps=round(fps_real, 2), region=args.region)
     e = np.array(etiquetas)
     print(f"Guardado {ruta}: {len(fotos)} fotogramas")
     for k, frac in zip(teclas, e.mean(0)):

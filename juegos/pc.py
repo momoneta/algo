@@ -23,6 +23,11 @@ ALIAS = {"shift_l": "shift", "shift_r": "shift", "ctrl_l": "ctrl", "ctrl_r": "ct
 
 def nombre_tecla(tecla):
     """Convierte un evento de pynput en un nombre simple: 'w', 'space', 'shift', 'up'..."""
+    # Primero el codigo de tecla fisica: con Ctrl o Shift pulsados, 'char' cambia
+    # (Ctrl+W da '\x17', Shift+1 da '!'), pero la tecla fisica sigue siendo la misma.
+    vk = getattr(tecla, "vk", None)
+    if vk is not None and (0x41 <= vk <= 0x5A or 0x61 <= vk <= 0x7A or 0x30 <= vk <= 0x39):
+        return chr(vk).lower()
     char = getattr(tecla, "char", None)
     if char:
         nombre = char.lower()
