@@ -276,11 +276,11 @@ def main():
         objetos = {o: h for o, h in objetos.items() if o in pedidos}
     detector = Detector(objetos) if objetos else None
     auto = None if args.sin_auto else DetectorAuto()
-    nombres_obj = (detector.nombres if detector else []) + (["cosas nuevas"] if auto else [])
+    nombres_obj = (detector.nombres if detector else []) + (["cosas"] if auto else [])
     pesos_obj = [args.peso_objetos] * (len(nombres_obj) - (1 if auto else 0)) + ([args.peso_auto] if auto else [])
     if nombres_obj:
         print("Busca: " + ", ".join(nombres_obj)
-              + ("  (cosas nuevas = colores raros en este juego, se detectan solas)" if auto else ""))
+              + ("  (cosas = lo que destaca en pantalla: arboles, rocas, animales... se detectan solas)" if auto else ""))
     canales = APILAR + (1 if nombres_obj else 0)
 
     red = RedQ(len(acciones), canales).to(d)
