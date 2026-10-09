@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from dispositivo import elegir_dispositivo, describir
-from juegos.pc import APILAR, CENTROS_MOV, Capturador, RedImitacion, Teclado, avisar_al_parar, nombre_tecla, parsear_region
+from juegos.pc import APILAR, CENTROS_MOV_ANTIGUOS, PELIGROSAS, Capturador, decidir_mov, RedImitacion, Teclado, avisar_al_parar, nombre_tecla, parsear_region
 
 
 def main():
@@ -25,6 +25,8 @@ def main():
     p.add_argument("--raton-escala", type=float, default=1.0,
                    help="multiplica el movimiento del raton (sube si gira poco, baja si gira demasiado)")
     p.add_argument("--sin-raton", action="store_true", help="no mover el raton aunque el modelo sepa")
+    p.add_argument("--suavizado", type=float, default=0.5,
+                   help="0 = sin suavizar, 0.9 = muy suave (menos temblores, reacciona mas lento)")
     p.add_argument("--dispositivo", default="auto")
     args = p.parse_args()
 
@@ -34,7 +36,9 @@ def main():
     teclas = datos["teclas"]
     d = elegir_dispositivo(args.dispositivo)
     raton = datos.get("raton", False)
-    modelo = RedImitacion(len(teclas), raton)
+    # los modelos antiguos usaban menos grupos de movimiento
+    centros_np = datos.get("centros_mov", CENTROS_MOV_ANTIGUOS.tolist())
+    modelo = RedImitacion(len(teclas), raton, len(centros_np))
     modelo.load_state_dict(datos["modelo"])
     modelo.to(d).eval()
     region = args.region if args.region is not None else datos.get("region", "")
@@ -42,7 +46,8 @@ def main():
     usar_raton = raton and not args.sin_raton
     print(f"Dispositivo: {describir(d)} | teclas {teclas} | {fps} fps"
           + (" | mueve el raton" if usar_raton else ""))
-    centros = torch.as_tensor(CENTROS_MOV, device=d)
+    centros = torch.as_tensor(centros_np, dtype=torch.float32, device=d)
+    suave_x = suave_y = 0.0
 
     parar = {"si": False}
 
@@ -75,16 +80,23 @@ def main():
                 lt, lx, ly = modelo(x)
                 prob = torch.sigmoid(lt)[0].cpu().numpy()
                 if usar_raton:
-                    # movimiento esperado segun las probabilidades de cada grupo
-                    dx = (torch.softmax(lx, 1)[0] * centros).sum().item() * args.raton_escala
-                    dy = (torch.softmax(ly, 1)[0] * centros).sum().item() * args.raton_escala
+                    dx = decidir_mov(lx, centros).item() * args.raton_escala
+                    dy = decidir_mov(ly, centros).item() * args.raton_escala
             for k, pr in zip(teclas, prob):
-                if k.startswith("clic_") and not usar_raton:
+                if k in PELIGROSAS or (k.startswith("clic_") and not usar_raton):
                     continue
                 teclado.poner(k, pr > args.umbral)
+            resto = max(0.0, periodo - (time.time() - t0))
             if usar_raton:
-                teclado.mover(dx if abs(dx) >= 2 else 0, dy if abs(dy) >= 2 else 0)
-            time.sleep(max(0.0, periodo - (time.time() - t0)))
+                # suavizado: mezcla con el movimiento anterior para quitar temblores
+                suave_x = args.suavizado * suave_x + (1 - args.suavizado) * dx
+                suave_y = args.suavizado * suave_y + (1 - args.suavizado) * dy
+                mx = suave_x if abs(suave_x) >= 1 else 0
+                my = suave_y if abs(suave_y) >= 1 else 0
+                # el giro se reparte durante todo el fotograma: camara fluida, no a saltos
+                teclado.mover_suave(mx, my, resto)
+            else:
+                time.sleep(resto)
     finally:
         teclado.soltar_todo()
         oyente.stop()

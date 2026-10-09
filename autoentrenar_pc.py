@@ -7,9 +7,12 @@ La recompensa se calcula mirando la pantalla:
   * Barra (opcional): una zona de la pantalla con un color, p. ej. la barra de
     vida o de experiencia. Si hay mas de ese color -> premio; si hay menos -> castigo.
 
-  python autoentrenar_pc.py --nombre minecraft --teclas w,a,s,d,space --raton --minutos 60
-  python autoentrenar_pc.py --nombre minecraft --teclas w,a,s,d,space --raton --desde-imitacion
-  python autoentrenar_pc.py --nombre juego --teclas a,d,space --barra 20,40,200,10 --barra-color 0,200,0
+  python autoentrenar_pc.py --nombre minecraft --minutos 60
+  python autoentrenar_pc.py --nombre minecraft --desde-imitacion
+  python autoentrenar_pc.py --nombre juego --barra 20,40,200,10 --barra-color 0,200,0
+
+Teclas: por defecto usa las que tu usaste en tus grabaciones de ese juego; si no hay
+grabaciones, un conjunto amplio de teclas tipicas de juego. Tambien se puede dar una lista.
 
   F9 = pausar/continuar (para arreglar algo a mano)   F10 = parar y guardar
 Despues, para verla jugar sin seguir aprendiendo:  ... --solo-jugar
@@ -25,10 +28,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dispositivo import elegir_dispositivo, describir
-from juegos.pc import (APILAR, CLICS, TAM, Capturador, RedImitacion, Teclado, avisar_al_parar,
-                       nombre_tecla, parsear_region, parsear_teclas)
+from juegos.pc import (APILAR, CLICS, PELIGROSAS, TAM, TECLAS_JUEGO, Capturador, RedImitacion, Teclado,
+                       avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas, teclas_grabadas)
 
-MIRAR = 30  # pixeles que gira la camara en cada accion de raton
+GIROS = (8, 25, 60)  # pixeles por accion: apuntar fino, girar, girar rapido
+
+
+def elegir_teclas(texto, nombre, carpeta_datos):
+    teclas = parsear_teclas(texto)
+    if teclas is not None:
+        return [k for k in teclas if k not in PELIGROSAS], "las que has indicado"
+    ruta_imit = os.path.join("modelos", f"pc_{nombre}.pt")
+    if os.path.exists(ruta_imit):
+        t = torch.load(ruta_imit, map_location="cpu", weights_only=False)["teclas"]
+        t = [k for k in t if not k.startswith("clic_") and k not in PELIGROSAS]
+        if t:
+            return t, f"las de tu modelo de imitacion ({ruta_imit})"
+    t = teclas_grabadas(os.path.join(carpeta_datos, nombre))
+    if t:
+        return t, "las que usaste en tus grabaciones"
+    return list(TECLAS_JUEGO), "teclas tipicas de juego (no hay grabaciones)"
 
 
 def crear_acciones(teclas, raton):
@@ -38,10 +57,14 @@ def crear_acciones(teclas, raton):
     if "w" in teclas:  # combinaciones utiles al andar
         acciones += [(("w", k), 0, 0) for k in teclas if k in ("space", "shift", "ctrl", "a", "d")]
     if raton:
-        acciones += [((), -MIRAR, 0), ((), MIRAR, 0), ((), 0, -MIRAR // 2), ((), 0, MIRAR // 2)]
+        for g in GIROS:  # mirar a los lados en varias velocidades
+            acciones += [((), -g, 0), ((), g, 0)]
+        for g in GIROS[:2]:  # arriba/abajo, menos rapido
+            acciones += [((), 0, -g // 2), ((), 0, g // 2)]
         acciones += [((c,), 0, 0) for c in CLICS.values()]
-        if "w" in teclas:
-            acciones += [(("w",), -MIRAR, 0), (("w",), MIRAR, 0)]
+        if "w" in teclas:  # andar girando
+            acciones += [(("w",), -GIROS[1], 0), (("w",), GIROS[1], 0)]
+        acciones += [(("clic_izq",), -GIROS[0], 0), (("clic_izq",), GIROS[0], 0)]  # picar apuntando
     return acciones
 
 
@@ -131,8 +154,10 @@ class Memoria:
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--nombre", required=True)
-    p.add_argument("--teclas", default="w,a,s,d,space")
-    p.add_argument("--raton", action="store_true", help="tambien mover la camara y hacer clic")
+    p.add_argument("--teclas", default="auto", help="'auto' (por defecto) o una lista: w,a,s,d,space")
+    p.add_argument("--sin-raton", action="store_true", help="no mover la camara ni hacer clic")
+    p.add_argument("--raton", action="store_true", help=argparse.SUPPRESS)  # antiguo: ahora es lo normal
+    p.add_argument("--carpeta", default="datos_pc", help=argparse.SUPPRESS)
     p.add_argument("--region", default="", help="x,y,ancho,alto del juego (vacio = pantalla completa)")
     p.add_argument("--fps", type=float, default=5, help="decisiones por segundo")
     p.add_argument("--minutos", type=float, default=30)
@@ -164,9 +189,11 @@ def main():
         if args.solo_jugar:
             raise SystemExit(f"No existe {ruta}. Entrena primero sin --solo-jugar.")
         guardado = None
-        teclas = parsear_teclas(args.teclas)
-        raton, region = args.raton, args.region
-    acciones = crear_acciones(teclas, raton)
+        teclas, origen = elegir_teclas(args.teclas, args.nombre, args.carpeta)
+        print(f"Teclas: {', '.join(teclas)}  <- {origen}")
+        raton, region = not args.sin_raton, args.region
+    # al continuar se usan las mismas acciones con las que se entreno
+    acciones = guardado["acciones"] if guardado and "acciones" in guardado else crear_acciones(teclas, raton)
     print(f"Dispositivo: {describir(d)} | {len(acciones)} acciones posibles")
 
     red = RedQ(len(acciones)).to(d)
@@ -228,7 +255,7 @@ def main():
     def guardar():
         if not args.solo_jugar:
             torch.save({"red": red.state_dict(), "curiosidad": curiosidad.state_dict(), "teclas": teclas,
-                        "raton": raton, "region": region, "pasos": pasos}, ruta)
+                        "raton": raton, "region": region, "pasos": pasos, "acciones": acciones}, ruta)
 
     foto = cap.captura()
     idx = memoria.nueva_foto(foto, corte=True)
@@ -255,8 +282,7 @@ def main():
             # 2. Hacerla en el juego
             for k in teclas + ([c for c in CLICS.values()] if raton else []):
                 teclado.poner(k, k in pulsa)
-            teclado.mover(dx, dy)
-            time.sleep(max(0.0, periodo - (time.time() - t0)))
+            teclado.mover_suave(dx, dy, max(0.0, periodo - (time.time() - t0)))
 
             # 3. Mirar el resultado y calcular la recompensa
             nueva = cap.captura()

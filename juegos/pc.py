@@ -17,8 +17,40 @@ APILAR = 4      # la red ve los ultimos 4 fotogramas para percibir movimiento
 
 # Raton: los clics se tratan como "teclas" con estos nombres
 CLICS = {"left": "clic_izq", "right": "clic_der"}
-# Movimiento del raton por fotograma (pixeles), en grupos: la red elige el grupo
-CENTROS_MOV = np.array([-80, -40, -20, -10, -4, 0, 4, 10, 20, 40, 80], dtype=np.float32)
+# Movimiento del raton por fotograma (pixeles), en grupos: la red elige el grupo.
+# Escala "logaritmica": mucho detalle en movimientos finos (apuntar) y tambien giros rapidos.
+CENTROS_MOV = np.array([-160, -100, -60, -35, -20, -10, -5, -2, 0, 2, 5, 10, 20, 35, 60, 100, 160],
+                       dtype=np.float32)
+CENTROS_MOV_ANTIGUOS = np.array([-80, -40, -20, -10, -4, 0, 4, 10, 20, 40, 80], dtype=np.float32)
+
+# Teclas que la IA nunca pulsa (controles del programa, menu de Windows, Alt+F4, Esc abre menus)
+PELIGROSAS = {"f9", "f10", "cmd", "f4", "esc", "print_screen", "caps_lock", "num_lock", "scroll_lock",
+              "menu", "pause", "insert"}
+# Teclas tipicas de juego, para aprender sola cuando no hay grabaciones de las que sacarlas
+TECLAS_JUEGO = ["w", "a", "s", "d", "space", "shift", "ctrl", "e", "q", "r", "f", "c", "x", "z",
+                "1", "2", "3", "4", "5", "6", "7", "8", "9", "up", "down", "left", "right"]
+
+
+def decidir_mov(logits, centros):
+    """Movimiento a partir de las probabilidades de cada grupo.
+
+    La media de TODOS los grupos tiende a dejar el raton casi quieto (izquierda y derecha se anulan),
+    asi que se toma el grupo mas probable y se afina con sus dos vecinos.
+    logits: (B, n_grupos)  centros: tensor (n_grupos,)  ->  (B,)
+    """
+    prob = torch.softmax(logits, 1)
+    mejor = prob.argmax(1)
+    n = prob.shape[1]
+    vecinos = torch.stack([(mejor - 1).clamp(0, n - 1), mejor, (mejor + 1).clamp(0, n - 1)], 1)
+    p = prob.gather(1, vecinos)
+    return (p * centros[vecinos]).sum(1) / p.sum(1)
+
+
+def objetivo_suave(clases, n, ancho=0.8):
+    """Etiqueta 'suave': el grupo correcto y un poco sus vecinos (fallar por poco cuesta menos)."""
+    i = torch.arange(n, device=clases.device, dtype=torch.float32)
+    t = torch.exp(-((i[None, :] - clases[:, None].float()) ** 2) / (2 * ancho ** 2))
+    return t / t.sum(1, keepdim=True)
 
 
 def mov_a_clase(v):
@@ -48,7 +80,31 @@ def nombre_tecla(tecla):
 
 
 def parsear_teclas(texto):
+    """'w,a,s,d' -> lista. 'todas' / 'auto' / '' -> None (se deciden solas)."""
+    if not texto or texto.strip().lower() in ("todas", "auto", "all"):
+        return None
     return [ALIAS.get(t.strip().lower(), t.strip().lower()) for t in texto.split(",") if t.strip()]
+
+
+def ordenar_teclas(teclas):
+    """Orden estable y legible: letras, numeros, especiales y al final los clics."""
+    def clave(k):
+        return (k.startswith("clic_"), len(k) > 1, k)
+    return sorted(set(teclas), key=clave)
+
+
+def teclas_grabadas(carpeta):
+    """Todas las teclas usadas en las grabaciones de una carpeta (sin los clics)."""
+    import glob
+    import os
+    vistas = set()
+    for a in glob.glob(os.path.join(carpeta, "*.npz")):
+        with np.load(a) as d:
+            e = d["etiquetas"]
+            for k, n in zip(d["teclas"], e.sum(0)):
+                if n > 0:
+                    vistas.add(str(k))
+    return [k for k in ordenar_teclas(vistas) if not k.startswith("clic_") and k not in PELIGROSAS]
 
 
 def parsear_region(texto):
@@ -85,11 +141,12 @@ class RedImitacion(nn.Module):
     Salida: [n_teclas logits | len(CENTROS_MOV) logits para X | len(CENTROS_MOV) logits para Y]
     """
 
-    def __init__(self, n_teclas, raton=False):
+    def __init__(self, n_teclas, raton=False, n_mov=len(CENTROS_MOV)):
         super().__init__()
         self.n_teclas = n_teclas
         self.raton = raton
-        n_salida = n_teclas + (2 * len(CENTROS_MOV) if raton else 0)
+        self.n_mov = n_mov
+        n_salida = n_teclas + (2 * n_mov if raton else 0)
         self.conv = nn.Sequential(
             nn.Conv2d(APILAR, 32, 8, stride=4), nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2), nn.ReLU(),
@@ -106,7 +163,7 @@ class RedImitacion(nn.Module):
         teclas = out[:, :self.n_teclas]
         if not self.raton:
             return teclas, None, None
-        nb = len(CENTROS_MOV)
+        nb = self.n_mov
         return teclas, out[:, self.n_teclas:self.n_teclas + nb], out[:, self.n_teclas + nb:]
 
 
@@ -187,6 +244,19 @@ class Teclado:
             self.directo.moveRel(dx, dy, relative=True)
         else:
             self.raton.move(dx, dy)
+
+    def mover_suave(self, dx, dy, tiempo, pasos=6):
+        """Reparte el movimiento en varios pasos pequenos durante 'tiempo' segundos (camara fluida)."""
+        import time
+        pasos = max(1, pasos)
+        hecho_x = hecho_y = 0
+        for i in range(1, pasos + 1):
+            # se redondea el acumulado para no perder decimales por el camino
+            ox, oy = round(dx * i / pasos), round(dy * i / pasos)
+            self.mover(ox - hecho_x, oy - hecho_y)
+            hecho_x, hecho_y = ox, oy
+            if tiempo > 0:
+                time.sleep(tiempo / pasos)
 
     def _clic(self, nombre, pulsado):
         boton = "left" if nombre == "clic_izq" else "right"

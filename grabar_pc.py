@@ -1,7 +1,9 @@
 """Graba tu partida (pantalla + teclas) para que la IA aprenda a imitarte.
 
-  python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift
-  python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space --raton   (tambien camara y clics)
+  python grabar_pc.py --nombre minecraft
+      graba TODAS las teclas que pulses, el movimiento del raton y los clics
+  python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space --sin-raton
+      solo esas teclas y sin raton
 
 Controles mientras graba:
   F9  = empezar / pausar la grabacion
@@ -16,24 +18,26 @@ import time
 
 import numpy as np
 
-from juegos.pc import CLICS, Capturador, OyenteRaton, avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas
+from juegos.pc import CLICS, PELIGROSAS, Capturador, ordenar_teclas, OyenteRaton, avisar_al_parar, nombre_tecla, parsear_region, parsear_teclas
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--nombre", required=True, help="nombre del juego (carpeta de datos)")
-    p.add_argument("--teclas", default="w,a,s,d,space", help="teclas a aprender, separadas por comas")
+    p.add_argument("--teclas", default="todas", help="'todas' (por defecto) o una lista: w,a,s,d,space")
     p.add_argument("--region", default="", help="x,y,ancho,alto (vacio = pantalla completa)")
     p.add_argument("--fps", type=float, default=10)
-    p.add_argument("--raton", action="store_true", help="grabar tambien el movimiento y los clics del raton")
+    p.add_argument("--sin-raton", action="store_true", help="no grabar el raton")
+    p.add_argument("--raton", action="store_true", help=argparse.SUPPRESS)  # antiguo: ahora es lo normal
     p.add_argument("--carpeta", default="datos_pc")
     p.add_argument("--dispositivo", default="auto", help=argparse.SUPPRESS)  # grabar no usa la GPU
     args = p.parse_args()
 
     from pynput import keyboard
 
-    teclas = parsear_teclas(args.teclas)
-    if args.raton:
+    teclas = parsear_teclas(args.teclas)  # None = todas
+    usar_raton = not args.sin_raton
+    if teclas is not None and usar_raton:
         teclas += [c for c in CLICS.values() if c not in teclas]
     pulsadas = set()
     toques = set()  # teclas pulsadas desde el ultimo fotograma (para no perder toques rapidos)
@@ -56,7 +60,7 @@ def main():
     oyente = keyboard.Listener(on_press=al_pulsar, on_release=al_soltar)
     oyente.start()
     raton = None
-    if args.raton:
+    if usar_raton:
         def al_clic(nombre, pulsado):
             if pulsado:
                 pulsadas.add(nombre)
@@ -67,7 +71,8 @@ def main():
     avisar_al_parar(estado)
     cap = Capturador(parsear_region(args.region))
 
-    print(f"Teclas a aprender: {teclas}")
+    print("Teclas a aprender: " + ("TODAS las que pulses" if teclas is None else ", ".join(teclas))
+          + (" + raton (camara y clics)" if usar_raton else ""))
     print("Pulsa F9 para empezar a grabar, F10 para terminar.", flush=True)
     fotos, etiquetas, movs = [], [], []
     periodo = 1.0 / args.fps
@@ -79,7 +84,8 @@ def main():
             fotos.append(cap.captura())
             ahora = pulsadas | toques
             toques.clear()
-            etiquetas.append([k in ahora for k in teclas])
+            # se guarda el conjunto de teclas de cada fotograma; la tabla se arma al final
+            etiquetas.append(frozenset(ahora - PELIGROSAS))
             if raton:
                 movs.append(raton.tomar())
             if time.time() - ultimo_aviso > 10:
@@ -101,6 +107,10 @@ def main():
     if fps_real < args.fps * 0.9:
         print(f"Aviso: tu PC solo llego a {fps_real:.1f} fps (pediste {args.fps:g}). "
               f"Usa --region con la zona del juego o menos --fps.")
+    if teclas is None:
+        vistas = set().union(*etiquetas)
+        teclas = ordenar_teclas(vistas | (set(CLICS.values()) if usar_raton else set()))
+    etiquetas = [[k in e for k in teclas] for e in etiquetas]
     carpeta = os.path.join(args.carpeta, args.nombre)
     os.makedirs(carpeta, exist_ok=True)
     ruta = os.path.join(carpeta, f"sesion_{time.strftime('%Y%m%d_%H%M%S')}.npz")
