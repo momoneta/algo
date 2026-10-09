@@ -3,9 +3,16 @@
 Proyecto para entrenar tu propia IA **en tu PC**, sin servicios en la nube.
 Funciona con CPU, GPU dedicada y **GPU integrada** (Intel Iris Xe / Arc, AMD Radeon, Apple M).
 
+**¿No te gustan los comandos?** Abre la interfaz gráfica y hazlo todo con botones:
+
+```bash
+python interfaz.py
+```
+
 | Qué quieres | Script | Cómo aprende |
 |---|---|---|
 | Que juegue a un juego | `entrenar_juego.py` → `jugar.py` | Aprendizaje por refuerzo (DQN) |
+| Que juegue a **cualquier juego de tu PC** | `grabar_pc.py` → `entrenar_pc.py` → `jugar_pc.py` | Te imita: aprende de tus partidas grabadas |
 | Un modelo de código desde cero | `entrenar_codigo.py` → `generar_codigo.py` | Mini GPT entrenado con tus archivos |
 | Un asistente de código bueno | `finetune_codigo.py` → `chat_codigo.py` | Ajuste LoRA de un modelo ya preentrenado (Qwen2.5-Coder) |
 
@@ -62,7 +69,7 @@ python jugar.py --modelo modelos/snake_mejor.pt
 
 # Cualquier juego de Gymnasium con acciones discretas
 python entrenar_juego.py --juego CartPole-v1 --episodios 500
-python entrenar_juego.py --juego LunarLander-v3 --episodios 1500
+python entrenar_juego.py --juego LunarLander-v3 --episodios 1500   # requiere: pip install "gymnasium[box2d]"
 python jugar.py --modelo modelos/LunarLander-v3_mejor.pt
 
 # Atari (pip install ale-py) — necesita muchas horas, mejor con GPU
@@ -75,6 +82,36 @@ Seguir entrenando un modelo: `--continuar modelos/snake_mejor.pt`.
 `juegos/snake_env.py` (devuelve observación, recompensa, terminado, truncado, info)
 y añádela en `crear_entorno()` de `entrenar_juego.py`. La clave es diseñar bien la
 **recompensa**: premia lo que quieres que haga y castiga lo que no.
+
+---
+
+## 2b. IA que juega a cualquier juego de PC (por imitación)
+
+Funciona con casi cualquier juego (Minecraft, juegos de carreras, plataformas, emuladores…):
+
+1. **Grabar**: juegas tú y se guardan la pantalla y las teclas que pulsas.
+   ```bash
+   python grabar_pc.py --nombre minecraft --teclas w,a,s,d,space,shift
+   ```
+   `F9` empieza/pausa, `F10` termina y guarda. Puedes grabar varias sesiones; se juntan todas.
+2. **Entrenar**: la red aprende "con esta imagen, se pulsan estas teclas".
+   ```bash
+   python entrenar_pc.py --nombre minecraft --epocas 15
+   ```
+3. **Jugar**: la IA mira la pantalla y pulsa las teclas sola. Tienes 5 s para hacer clic en el juego; `F10` la para.
+   ```bash
+   python jugar_pc.py --modelo modelos/pc_minecraft.pt
+   ```
+
+Consejos:
+- Pon el juego **en ventana** y usa `--region x,y,ancho,alto` con la zona del juego (más rápido y preciso).
+- Graba **mucho** (30–60 min) y juega siempre de forma parecida: la IA copia lo que ve, también tus errores.
+- Elige pocas teclas: solo las importantes.
+- Si la IA no pulsa casi nada, baja `--umbral` (p. ej. 0.3); si pulsa demasiado, súbelo.
+- En Windows, `pydirectinput` hace que funcione con juegos DirectX que ignoran las teclas simuladas normales.
+- Aprende lo que ve en una imagen pequeña (96×96 en grises), así que funciona mejor en juegos de reacción
+  (esquivar, conducir, saltar) que en juegos de estrategia o con mucho texto. El ratón no se graba.
+- **No lo uses en juegos online con anti-trampas**: te pueden banear la cuenta.
 
 ---
 
@@ -136,6 +173,11 @@ Las GPUs integradas usan la RAM del sistema: si tienes 16 GB o más, puedes subi
 ## Estructura
 
 ```
+interfaz.py           interfaz gráfica con todo lo de abajo
+grabar_pc.py          graba tus partidas de cualquier juego de PC
+entrenar_pc.py        entrena la IA que te imita
+jugar_pc.py           la IA juega sola pulsando teclas
+juegos/pc.py          captura de pantalla, red de imitación y teclado
 dispositivo.py        detección de CPU / GPU (incluidas integradas)
 entrenar_juego.py     entrena la IA de juegos (DQN)
 jugar.py              mira jugar a la IA

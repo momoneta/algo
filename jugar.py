@@ -5,6 +5,7 @@
 """
 import argparse
 import os
+import sys
 import time
 
 from dispositivo import elegir_dispositivo
@@ -27,6 +28,7 @@ def main():
     modo = None if args.sin_ventana or es_snake else "human"
     env = crear_entorno(juego, extra.get("atari", False), render_mode=modo)
 
+    resultados = []
     for partida in range(1, args.partidas + 1):
         obs, _ = env.reset()
         total, fin = 0.0, False
@@ -35,11 +37,15 @@ def main():
             total += r
             fin = terminado or truncado
             if es_snake and not args.sin_ventana:
-                os.system("cls" if os.name == "nt" else "clear")
-                print(env.render())
+                if sys.stdout.isatty():
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print(env.render())
+                else:  # dentro de la interfaz: \f indica "limpiar pantalla"
+                    print("\f" + env.render() + "\n" + "\n".join(resultados), flush=True)
                 time.sleep(args.velocidad)
         extra_txt = f" | puntos {info['puntos']}" if "puntos" in info else ""
-        print(f"Partida {partida}: recompensa {total:.1f}{extra_txt}")
+        resultados.append(f"Partida {partida}: recompensa {total:.1f}{extra_txt}")
+        print(resultados[-1])
     env.close()
 
 
